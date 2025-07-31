@@ -3,7 +3,7 @@ variable "cluster_name" {
     type        = string
 }
 
-variable "subnet_ids" {
+variable "private_subnet_ids" {
     type = list(string)
 }
 
@@ -11,7 +11,18 @@ variable "security_group_id" {
     type = string
 }
 
-variable "image_url" {
+variable "nginx_php_image_url" {
     description = "ECR image URL for the container"
     type        = string
 }
+
+variable "aws_region" {
+    type        = string
+    description = "AWS Region"
+}
+
+variable "aws_vpc_id" {
+    description = "ID of the AWS VPC"
+}
+
+variable "aws_lb_target_group_arn" {}

@@ -1,14 +1,16 @@
-name: CI Pipeline
+name: Main
 
 on:
-    push:
-        branches:
-            - '**'
+    #push:
+    #    branches:
+    #        - '**'
     workflow_dispatch:   # Enables manual trigger
 
 env:
-    NGINX_IMAGE_URI: ${{ env.CI_REGISTRY }}/${{ github.ref_name }}/nginx:${{ github.sha_short }}
-    PHP_IMAGE_URI: ${{ env.CI_REGISTRY }}/${{ github.ref_name }}/php:${{ github.sha_short }}
+    AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
+    NGINX_PHP_IMAGE_NAME: "koro-ecr-nginx-php"
 
 jobs:
     composer_install:
@@ -16,162 +18,161 @@ jobs:
         runs-on: ubuntu-latest
         container: composer/composer:2.8.9
         steps:
-            - uses: actions/checkout@v3
-            - name: Remove vendor
-              run: rm -rf vendor
-            - name: Composer install
-              run: composer install
-            - name: Upload vendor
-              uses: actions/upload-artifact@v3
-              with:
-                  name: vendor
-                  path: vendor
+            -   uses: actions/checkout@v4
+            -   name: list env
+                run: env
+            -   name: Remove vendor
+                run: rm -rf vendor
+            -   name: Composer install
+                run: composer install
+            -   name: Upload vendor
+                uses: actions/upload-artifact@v4
+                with:
+                    name: vendor
+                    path: vendor
 
     docker_build_images:
         name: Docker Build Images
         runs-on: ubuntu-latest
         needs: composer_install
-        services:
-            docker:
-                image: docker:24.0.5-dind
-                options: --privileged
-                ports:
-                    - 2375:2375
         env:
             CI_REGISTRY: ${{ secrets.CI_REGISTRY }}
             CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
             CI_REGISTRY_PASSWORD: ${{ secrets.CI_REGISTRY_PASSWORD }}
-            NGINX_IMAGE_URI: ${{ env.NGINX_IMAGE_URI }}
-            PHP_IMAGE_URI: ${{ env.PHP_IMAGE_URI }}
         steps:
-            - uses: actions/checkout@v3
-            - name: Login to registry
-              run: echo $CI_REGISTRY_PASSWORD | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
-            - name: Build NGINX image
-              run: docker build -f docker/nginx/Dockerfile . -t $NGINX_IMAGE_URI
-            - name: Save NGINX image
-              run: docker save $NGINX_IMAGE_URI -o nginx.tar
-            - name: Build PHP image
-              run: docker build -f docker/php/Dockerfile . -t $PHP_IMAGE_URI
-            - name: Save PHP image
-              run: docker save $PHP_IMAGE_URI -o php.tar
-            - name: Upload images tar
-              uses: actions/upload-artifact@v3
-              with:
-                  name: docker-images
-                  path: |
-                      nginx.tar
-                      php.tar
+            -   uses: actions/checkout@v4
+            -   name: Download docker images artifact
+                uses: actions/download-artifact@v4
+                with:
+                    name: vendor
+                    path: vendor
+            -   name: Build NGINX and PHP images
+                run: |
+                    docker build -f docker/nginx_php/Dockerfile . -t $NGINX_PHP_IMAGE_NAME
+            -   name: Save NGINX and PHP images
+                run: |
+                    docker save $NGINX_PHP_IMAGE_NAME -o nginx_php.tar
+            -   name: Upload images tar
+                uses: actions/upload-artifact@v4
+                with:
+                    name: docker-images
+                    path: |
+                        nginx_php.tar
+
+    docker_push_images:
+        name: Docker Push Images
+        runs-on: ubuntu-latest
+        environment: production
+        needs:
+            - docker_build_images
+            - terraform_apply
+            - phpunit
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+            CI_REGISTRY: ${{ secrets.CI_REGISTRY }}
+            CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
+            CI_REGISTRY_PASSWORD: ${{ secrets.CI_REGISTRY_PASSWORD }}
+        steps:
+            -   uses: actions/checkout@v4
+            -   name: Configure AWS credentials
+                uses: aws-actions/configure-aws-credentials@v2
+                with:
+                    aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+                    aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+                    aws-region: ${{ vars.AWS_DEFAULT_REGION }}
+            -   name: Login to Amazon ECR
+                id: login-ecr
+                uses: aws-actions/amazon-ecr-login@v2
+
+            -   name: Download docker images artifact
+                uses: actions/download-artifact@v4
+                with:
+                    name: docker-images
+
+            -   name: Load NGINX and PHP images from artifact
+                run: |
+                    docker load -i nginx_php.tar
+            -   name: Push NGINX and PHP images
+                run: |
+                    docker tag $NGINX_PHP_IMAGE_NAME ${{needs.terraform_apply.outputs.nginx_php_repository_url}}
+                    docker push ${{needs.terraform_apply.outputs.nginx_php_repository_url}}
 
     phpunit:
         name: PHPUnit Tests
         runs-on: ubuntu-latest
         needs: docker_build_images
-        env:
-            PHP_IMAGE_URI: ${{ env.PHP_IMAGE_URI }}
         steps:
-            - uses: actions/checkout@v3
-            - name: Download docker images artifact
-              uses: actions/download-artifact@v3
-              with:
-                  name: docker-images
-                  path: .
-            - name: Load PHP image
-              run: docker load -i php.tar
-            - name: Run PHPUnit
-              run: docker run $PHP_IMAGE_URI bin/phpunit
-
-    docker_push_images:
-        name: Docker Push Images
-        runs-on: ubuntu-latest
-        needs: docker_build_images
-        if: github.event_name == 'workflow_dispatch'  # Manual trigger for push
-        env:
-            CI_REGISTRY: ${{ secrets.CI_REGISTRY }}
-            CI_REGISTRY_USER: ${{ secrets.CI_REGISTRY_USER }}
-            CI_REGISTRY_PASSWORD: ${{ secrets.CI_REGISTRY_PASSWORD }}
-            NGINX_IMAGE_URI: ${{ env.NGINX_IMAGE_URI }}
-            PHP_IMAGE_URI: ${{ env.PHP_IMAGE_URI }}
-        steps:
-            - uses: actions/checkout@v3
-            - name: Download docker images artifact
-              uses: actions/download-artifact@v3
-              with:
-                  name: docker-images
-                  path: .
-            - name: Login to registry
-              run: echo $CI_REGISTRY_PASSWORD | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
-            - name: Load NGINX image
-              run: docker load -i nginx.tar
-            - name: Push NGINX image
-              run: docker push $NGINX_IMAGE_URI
-            - name: Load PHP image
-              run: docker load -i php.tar
-            - name: Push PHP image
-              run: docker push $PHP_IMAGE_URI
+            -   uses: actions/checkout@v4
+            -   name: Download docker images artifact
+                uses: actions/download-artifact@v4
+                with:
+                    name: docker-images
+            -   name: Run PHPUnit
+                run: |
+                    docker load -i nginx_php.tar
+                    docker run $NGINX_PHP_IMAGE_NAME bin/phpunit
 
     terraform_validate:
         name: Terraform Validate
         runs-on: ubuntu-latest
         container:
             image: hashicorp/terraform:1.8.5
-            entrypoint: [""]
         steps:
-            - uses: actions/checkout@v3
-            - name: Terraform init (no backend)
-              run: |
-                  cd terraform
-                  terraform init -backend=false
-            - name: Terraform validate
-              run: |
-                  cd terraform
-                  terraform validate
+            -   uses: actions/checkout@v4
+            -   name: Terraform validate
+                run: |
+                    cd terraform
+                    terraform init -backend=false
+                    terraform validate
 
     terraform_plan:
         name: Terraform Plan
         runs-on: ubuntu-latest
+        environment: production
         container:
             image: hashicorp/terraform:1.8.5
-            entrypoint: [""]
-        needs: terraform_validate
+        needs:
+            - terraform_validate
         steps:
-            - uses: actions/checkout@v3
-            - name: Terraform init
-              run: |
-                  cd terraform
-                  terraform init
-            - name: Terraform plan
-              run: |
-                  cd terraform
-                  terraform plan -out=tfplan.binary
-            - name: Upload terraform plan
-              uses: actions/upload-artifact@v3
-              with:
-                  name: terraform-plan
-                  path: terraform/tfplan.binary
+            -   uses: actions/checkout@v4
+            -   name: Terraform plan
+                run: |
+                    cd terraform
+                    terraform init
+                    terraform plan -out=tfplan.binary
+            -   name: Upload terraform plan
+                uses: actions/upload-artifact@v4
+                with:
+                    name: terraform-plan
+                    path: terraform/tfplan.binary
 
     terraform_apply:
         name: Terraform Apply
         runs-on: ubuntu-latest
+        environment: production
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         container:
             image: hashicorp/terraform:1.8.5
-            entrypoint: [""]
         needs:
             - terraform_plan
-            - docker_push_images
             - phpunit
-        environment:
-            name: production
-            url: https://your-deployment-url.example.com
-        if: github.event_name == 'workflow_dispatch'   # manual run only
+        outputs:
+            nginx_php_repository_url: ${{ steps.terraform_output.outputs.nginx_php_repository_url }}
         steps:
-            - uses: actions/checkout@v3
-            - name: Download terraform plan artifact
-              uses: actions/download-artifact@v3
-              with:
-                  name: terraform-plan
-                  path: terraform
-            - name: Terraform apply
-              run: |
-                  cd terraform
-                  terraform apply -auto-approve tfplan.binary
+            -   uses: actions/checkout@v4
+            -   name: Download terraform plan artifact
+                uses: actions/download-artifact@v4
+                with:
+                    name: terraform-plan
+                    path: terraform
+            -   name: Terraform apply
+                run: |
+                    cd terraform
+                    terraform init
+                    terraform apply -auto-approve tfplan.binary
+            -   id: terraform_output
+                name: Terraform output
+                run: |
+                    cd terraform
+                    NGINX_PHP_REPOSITORY_URL=$(terraform output -raw nginx_php_repository_url)
+                    echo "nginx_php_repository_url=$NGINX_PHP_REPOSITORY_URL" >> $GITHUB_OUTPUT

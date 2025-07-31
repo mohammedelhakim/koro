@@ -1,20 +1,19 @@
 services:
-
-    nginx:
-        container_name: nginx
+    nginx_php_build:
+        container_name: nginx_php_build
         build:
             context: ./
-            dockerfile: docker/nginx/Dockerfile
+            dockerfile: docker/nginx_php/Dockerfile
+        image: nginx-php
+        command: echo "Image built successfully"
+
+    nginx_php:
+        container_name: nginx_php
         ports:
             - "8080:80"
-        restart: on-failure
-        depends_on:
-            - php
-    php:
-        container_name: php
         build:
-            context: ./
-            dockerfile: docker/php/Dockerfile
+            context: .
+            dockerfile: docker/nginx_php/dev/Dockerfile-xdebug
         volumes:
             - .:/var/www/html
         healthcheck:
@@ -23,13 +22,19 @@ services:
             timeout: 5s
             retries: 3
             start_period: 1s
+        restart: on-failure
+        environment:
+            PHP_IDE_CONFIG: serverName=localhost
+            KERNEL_CLASS: App\Kernel
         depends_on:
             - composer_install
+            - nginx_php_build
 
     composer_install:
         container_name: composer_install
-        working_dir: "/var/www/html"
-        image: "composer/composer:2.8.9"
+        build:
+            context: ./
+            dockerfile: docker/composer/Dockerfile
         volumes:
             - .:/var/www/html
         command: "install"

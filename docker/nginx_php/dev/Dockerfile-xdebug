@@ -1,0 +1,8 @@
+FROM nginx-php
+
+# Add Xdebug
+RUN apt-get update && apt-get install -y libzip-dev unzip \
+    && pecl install xdebug \
+    && docker-php-ext-enable xdebug
+
+COPY ../../docker/nginx_php/dev/xdebug.ini /usr/local/etc/php/conf.d/xdebug.ini

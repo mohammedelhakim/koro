@@ -1,7 +1,7 @@
-output "subnet_ids" {
-    value = [aws_subnet.public_a.id, aws_subnet.public_b.id]
+output "nginx_php_repository_url" {
+    value = module.ecr["nginx_php"].repository_url
 }
 
-output "security_group_id" {
-    value = aws_security_group.ecs_sg.id
+output "alb_dns_name" {
+    value = module.alb.dns_name
 }
