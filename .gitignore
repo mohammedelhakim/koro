@@ -1,0 +1,50 @@
+
+###> symfony/framework-bundle ###
+/.env.local
+/.env.local.php
+/.env.*.local
+/config/secrets/prod/prod.decrypt.private.php
+/public/bundles/
+/var/
+/vendor/
+###< symfony/framework-bundle ###
+
+
+# Composer dependencies
+/vendor/
+
+# Symfony cache and logs
+/var/cache/
+/var/log/
+
+# Symfony .env files
+.env.local
+.env.test.local
+.env.prod.local
+
+# PHPStorm / IDEs
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# PHPUnit test results
+/phpunit.result.cache
+
+# Coverage reports
+/coverage/
+
+# Docker and build artifacts
+/.docker/
+/docker-compose.override.yml
+
+.envrc
+
+###> phpunit/phpunit ###
+/phpunit.xml
+/.phpunit.cache/
+###< phpunit/phpunit ###
+
+.terraform

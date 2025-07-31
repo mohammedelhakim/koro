@@ -1,0 +1,28 @@
+# Ignore Git files
+.git
+.gitignore
+
+
+# Ignore cache and logs
+/var/cache
+/var/log
+
+# Ignore environment files (if sensitive)
+/.env.local
+/.env.test.local
+/.env.prod.local
+
+# Ignore Docker files to avoid copying build context unnecessarily
+docker/php/Dockerfile
+docker-compose.yml
+docker-compose.override.yml
+
+# Ignore IDE/editor folders
+.idea
+.vscode
+
+# Ignore build assets
+/public/build
+
+.envrc
+terraform
